@@ -1,7 +1,7 @@
 module.exports = {
-    component: function(filename){
+    componentDom: function(filename){
         return eval(
-            ssr.compile(
+            dom.compile(
                 FileReaderJS.readString(filename)
             )
         );
