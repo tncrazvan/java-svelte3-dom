@@ -39,7 +39,7 @@ public class Svelte3DOM {
         
         context.eval("js",tools);
         
-        Value ssr = context.eval("js", "(function(service){ssr=service;});");
+        Value ssr = context.eval("js", "(function(service){dom=service;});");
         ssr.executeVoid(this);
         
         context.eval("js","console.log('JavaScript initialized.');");
