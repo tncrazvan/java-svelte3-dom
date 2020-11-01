@@ -3,7 +3,7 @@
  * To change this template file, choose Tools | Templates
  * and open the template in the editor.
  */
-package com.mycompany.svelte3dom;
+package com.github.tncrazvan.svelte3dom;
 
 import java.io.IOException;
 import java.nio.charset.Charset;
@@ -54,7 +54,7 @@ public class Svelte3DOM {
     }
     
     public String compile(String source){
-        Value app = context.eval("js", "(function(source){return compile(source,{generate:'ssr',format:'cjs'}).js.code;});");
+        Value app = context.eval("js", "(function(source){return compile(source,{generate:'dom',format:'cjs'}).js.code;});");
         String result = app.execute(source).asString();
         return result;
     }

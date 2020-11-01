@@ -3,7 +3,9 @@
  * To change this template file, choose Tools | Templates
  * and open the template in the editor.
  */
-package com.mycompany.svelte3dom;
+package com.github.tncrazvan.svelte3dom;
+
+import java.nio.file.Path;
 
 /**
  *
@@ -11,6 +13,7 @@ package com.mycompany.svelte3dom;
  */
 public class Starter {
     public static void main(String[] args) {
-        
+        Svelte3DOM dom = new Svelte3DOM(Path.of(System.getProperty("user.dir")));
+        System.out.println(dom.compile("<p>hello world</p>"));
     }
 }
