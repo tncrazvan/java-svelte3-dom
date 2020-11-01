@@ -1,4 +1,4 @@
-package com.github.tncrazvan.svelte3dom;
+package com.mycompany.svelte3dom;
 
 
 import java.io.IOException;
