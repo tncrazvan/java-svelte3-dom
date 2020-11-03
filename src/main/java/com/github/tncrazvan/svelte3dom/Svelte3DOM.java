@@ -5,12 +5,15 @@
  */
 package com.github.tncrazvan.svelte3dom;
 
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -38,8 +41,7 @@ public class Svelte3DOM {
                     "const System = Java.type('java.lang.System');" +
                     "const FileReaderJS = Java.type('com.github.tncrazvan.svelte3dom.FileReaderJS');" +
                     "load('./node_modules/jvm-npm/src/main/javascript/jvm-npm.js');" +
-                    "const { compile } = require('./compiler.js');" +
-                    "const { componentDom } = require('./compileDom.js');"
+                    "const { compile } = require('./compiler.js');"
                     ;
             
             context.eval("js",tools);
@@ -58,10 +60,20 @@ public class Svelte3DOM {
         return context;
     }
     
+    private static final ProcessBuilder pb = new ProcessBuilder();
+    public static String rollup(String filename, String charset) throws IOException{
+        pb.directory(new File(System.getProperty("user.dir")));
+        pb.command("node","rollup.js",filename);
+        Process process = pb.start();
+        InputStream is = process.getInputStream();
+        String result = new String(is.readAllBytes(),charset);
+        return result;
+    }
     
     //compiling stuff
     
-    private void require(String[] names, String path, HashMap<String,HashMap<String,String>> imports) throws IOException{
+    private void require(String[] names, String path, LinkedHashMap<String,HashMap<String,String>> imports) throws IOException{
+        path = path.trim();
         if(!imports.containsKey(path))
             imports.put(path, new HashMap<>());
         
@@ -76,12 +88,14 @@ public class Svelte3DOM {
                 String value = 
                         PATTERN_USE_STRICT
                         .matcher(
-                            compileFile(path,"UTF-8",imports,false)
+                            compileFile(path,"UTF-8",imports,false,false)
                         )
                         .replaceAll("");
+                
+                value = value.replaceAll("export default Component;", "");
                 importedPath.put(
                     item, 
-                    "const "+item+" =(function (){\n" +
+                    "const "+item+" = (function (){\n" +
                         "let exports={};\n" +
                         value + "\n" +
                         "return Component;\n" +
@@ -93,29 +107,30 @@ public class Svelte3DOM {
                     String script = "(function (){const {"+item+"} = require('"+path+"'); if(!"+item+") FileReaderJS.readString('"+path+"'); else return "+item+".toString();})";
                     String value = context.eval("js",script).execute().asString();
                     importedPath.put(item, value);
-                }else
+                }else {
                     importedPath.put(item, Files.readString(Path.of(path)));
+                }
             }
         }
     }
     
     
-    private static final Pattern PATTERN_SVELTE_ITEMS = Pattern.compile("(?<=const)(?<=\\{)?.*(?=\\})?(?==)",Pattern.MULTILINE|Pattern.DOTALL);
-    private static final Pattern PATTERN_SVELTE_PATH = Pattern.compile("(?<=require\\(\\\"|').*(?=\\\"|'\\);)",Pattern.MULTILINE|Pattern.DOTALL);
-    private static final Pattern PATTERN_REQUIRES = Pattern.compile("^const .*require\\([\"'].*[\"']\\);",Pattern.MULTILINE);
+    private static final Pattern PATTERN_SVELTE_ITEMS = Pattern.compile("(?<=import).*(?=from)",Pattern.MULTILINE|Pattern.DOTALL);
+    private static final Pattern PATTERN_SVELTE_PATH = Pattern.compile("(?<=from)\\s+[\"'].*[\"'];?",Pattern.MULTILINE|Pattern.DOTALL);
+    private static final Pattern PATTERN_REQUIRES = Pattern.compile("import\\s\\{?\\s*\\n*([A-z_$][A-z0-9_$]*\\s*\\n*,*\\s*\\n*?)*\\s*\\n*\\}*\\s*\\n*from\\s*\\n*[\"'][A-z0-9_$\\/@\\.,;:|-]*[\"'\\s*\\n*];?",Pattern.MULTILINE|Pattern.DOTALL);
     private static final Pattern PATTERN_USE_STRICT = Pattern.compile("[\"']use strict[\"'];",Pattern.MULTILINE);
     
-    private void parseRequires(String requires, HashMap<String,HashMap<String,String>> imports) throws IOException{
+    private void parseRequires(String requires, LinkedHashMap<String,HashMap<String,String>> imports) throws IOException{
         Matcher mpath = PATTERN_SVELTE_PATH.matcher(requires);
         if(!mpath.find())
             return;
-        String path = mpath.group();
+        String path = mpath.group().replaceAll("('|;|\\\")+", "");
         Matcher mitems = PATTERN_SVELTE_ITEMS.matcher(requires);
         if(!mitems.find())
             return;
         String sitems = mitems
                 .group()
-                .replaceAll("[\\{|\\}]+", "")
+                .replaceAll("(\\{|\\})+", "")
                 .replaceAll(".*default:", "");
         String[] items = sitems.split(",");
         require(items, path, imports);
@@ -127,37 +142,52 @@ public class Svelte3DOM {
         String path;
     }
     public String compileFile(String filename,String charset) throws IOException{
-        return compileFile(filename, charset, new HashMap<>(), true);
+        return compileFile(filename, charset, new LinkedHashMap<>(), true, true);
     }
-    public String compileFile(String filename,String charset, HashMap<String,HashMap<String,String>> imports) throws IOException{
+    public String compileFile(String filename,String charset, LinkedHashMap<String,HashMap<String,String>> imports) throws IOException{
         return compileFile(filename, charset, imports, true);
     }
-    public String compileFile(String filename, String charset, HashMap<String,HashMap<String,String>> imports, boolean addGlobals) throws IOException{
+    public String compileFile(String filename, String charset, LinkedHashMap<String,HashMap<String,String>> imports, boolean addGlobals) throws IOException{
+        String contents = Files.readString(Path.of(filename), Charset.forName(charset));
         return compile(
-                Files.readString(Path.of(filename), Charset.forName(charset)),
-                imports,
-                addGlobals
+            contents,
+            imports,
+            addGlobals,
+            true
+        );
+    }
+    public String compileFile(String filename, String charset, LinkedHashMap<String,HashMap<String,String>> imports, boolean addGlobals, boolean addImports) throws IOException{
+        String contents = Files.readString(Path.of(filename), Charset.forName(charset));
+        return compile(
+            contents,
+            imports,
+            addGlobals,
+            addImports
         );
     }
     
     public String compile(String source) throws IOException{
-        return compile(source, new HashMap<>(), true);
+        return compile(source, new LinkedHashMap<>(), true, true);
     }
     
-    public String compile(String source, HashMap<String,HashMap<String,String>> imports) throws IOException{
-        return compile(source, imports, true);
+    public String compile(String source, LinkedHashMap<String,HashMap<String,String>> imports) throws IOException{
+        return compile(source, imports, true, true);
     }
     
-    public String compile(String source, HashMap<String,HashMap<String,String>> imports, boolean addGlobals) throws IOException{
-        Value app = context.eval("js", "(function(source){return compile(source,{generate:'dom',format:'cjs'}).js.code;});");
+    public String compile(String source, LinkedHashMap<String,HashMap<String,String>> imports, boolean addGlobals) throws IOException{
+        return compile(source, imports, addGlobals, true);
+    }
+    
+    public String compile(String source, LinkedHashMap<String,HashMap<String,String>> imports, boolean addGlobals, boolean addImports) throws IOException{
+        Value app = context.eval("js", "(function(source){return compile(source,{generate:'dom',format:'esm'}).js.code;});");
         String compiledContents = app.execute(source).asString();
         
         
         Matcher m = PATTERN_REQUIRES.matcher(compiledContents);
         while(m.find()){
             String item = m.group();
-            //System.out.println("import:"+item);
-            parseRequires(item,imports);
+            System.out.println("import:"+item);
+            parseRequires(item.trim(),imports);
         }
         compiledContents = m.replaceAll("");
         
@@ -174,37 +204,39 @@ public class Svelte3DOM {
             "let update_scheduled = false;"
         ):"";
         
-        require(new String[]{
-            "is_function",
-            "flush",
-            "add_render_callback",
-            "mount_component",
-            "run",
-            "run_all",
-            "get_current_component",
-            "blank_object",
-            "set_current_component"
-        }, "svelte/internal", imports);
+        if(addImports)
+            require(new String[]{
+                "is_function",
+                "flush",
+                "add_render_callback",
+                "mount_component",
+                "run",
+                "run_all",
+                "get_current_component",
+                "blank_object",
+                "set_current_component"
+            }, "svelte/internal", imports);
         
         
         
         
         ArrayList<String> headers = new ArrayList<>();
         
-        imports.forEach(((path, importsObject) -> {
-            importsObject.forEach((name, contents) -> {
-                headers.add(contents);
-            });
-        }));
+        if(addImports)
+            imports.forEach(((path, importsObject) -> {
+                importsObject.forEach((name, contents) -> {
+                    headers.add(contents);
+                });
+            }));
         
-        String[] pieces = PATTERN_USE_STRICT.split(compiledContents, 2);
         compiledContents = String.join("\n", 
-            pieces[0],
-            "'use strict';",
             globals,
             String.join("\n",headers), 
-            pieces[1]
+            compiledContents
         );
+        
+        int end = compiledContents.length()-1-("export default Component;".length());
+        compiledContents = compiledContents.substring(0, end);
         return compiledContents;
     }
     
