@@ -11,7 +11,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -62,69 +64,57 @@ public class Svelte3DOM {
     
     //compiling stuff
     
-    private String require(String[] names, String path,HashMap<String,List<String>> imports){
-        boolean pathFound = imports.containsKey(path);
-        if(!pathFound)
-            imports.put(path, new ArrayList<>());
-        String result = "";
+    private void require(String[] names, String path, HashMap<String,HashMap<String,String>> imports) throws IOException{
+        if(!imports.containsKey(path))
+            imports.put(path, new HashMap<>());
+        
+        HashMap<String,String> importedPath = imports.get(path);
         
         for(String item : names){
             item = item.trim();
-            List<String> importObject = imports.get(path);
-            if(importObject.contains(item))
-                continue;
-            importObject.add(item);
             if(path.endsWith(".svelte")){
-                System.out.println("################");
-                System.out.println("compiler svelte:\n"+compile(path));
-                System.out.println("____________________");
+                if(imports.get(path).containsKey(item)){
+                    continue;
+                }
+                String value = 
+                        PATTERN_USE_STRICT
+                        .matcher(
+                            compileFile(path,"UTF-8",imports,false)
+                        )
+                        .replaceAll("");
+                importedPath.put(
+                    item, 
+                    "const "+item+" =(function (){\n" +
+                        "let exports={};\n" +
+                        value + "\n" +
+                        "return Component;\n" +
+                    "})();"
+                );
             }else{
                 String script = "(function (){const {"+item+"} = require('"+path+"'); return "+item+".toString();})";
-                result += context.eval("js",script).execute().asString()+"\n";
+                String value = context.eval("js",script).execute().asString();
+                importedPath.put(item, value);
             }
         }
-        return result;
     }
     
     
-    private static final Pattern PATTERN_SVELTE_ITEMS = Pattern.compile("(?<=\\{).*(?=\\})",Pattern.MULTILINE|Pattern.DOTALL);
+    private static final Pattern PATTERN_SVELTE_ITEMS = Pattern.compile("(?<=const)(?<=\\{)?.*(?=\\})?(?==)",Pattern.MULTILINE|Pattern.DOTALL);
     private static final Pattern PATTERN_SVELTE_PATH = Pattern.compile("(?<=require\\(\\\").*(?=\\\"\\);)",Pattern.MULTILINE|Pattern.DOTALL);
-    private static final Pattern PATTERN_SVELTE_ANYTHING = Pattern.compile("^const .*require\\([\"'].*[\"']\\);",Pattern.MULTILINE);
+    private static final Pattern PATTERN_REQUIRES = Pattern.compile("^const .*require\\([\"'].*[\"']\\);",Pattern.MULTILINE);
+    private static final Pattern PATTERN_USE_STRICT = Pattern.compile("[\"']use strict[\"'];",Pattern.MULTILINE);
     
-    private String[] matchExtractAndReplaceSvelteAnything(String compiledContents,HashMap<String,List<String>> imports){
-        //FIRST TIME (matching & extracting)
-        String svelteAnythingPieces[] = PATTERN_SVELTE_ANYTHING.split(compiledContents);
-        Matcher m = PATTERN_SVELTE_ANYTHING.matcher(compiledContents);
-        String[] replacements = new String[svelteAnythingPieces.length-1];
-        int i = 0;
-        while(m.find()){
-            replacements[i] = extractRequires(m.group(),imports);
-            i++;
-        }
-        
-        //SECOND TIME (appending missing requirements)
-        m = PATTERN_SVELTE_ANYTHING.matcher(compiledContents);
-        for(i = 0; i < svelteAnythingPieces.length; i++){
-            if(i<svelteAnythingPieces.length-1){
-                svelteAnythingPieces[i] += replacements[i];
-            }
-        }
-        
-        return svelteAnythingPieces;
-    }
-    
-    
-    
-    private String extractRequires(String requires,HashMap<String,List<String>> imports){
+    private void parseRequires(String requires, HashMap<String,HashMap<String,String>> imports) throws IOException{
         Matcher mpath = PATTERN_SVELTE_PATH.matcher(requires);
         if(!mpath.find())
-            return "";
+            return;
         String path = mpath.group();
         Matcher mitems = PATTERN_SVELTE_ITEMS.matcher(requires);
         if(!mitems.find())
-            return "";
-        String[] items = mitems.group().split(",");
-        return require(items, path, imports);
+            return;
+        String sitems = mitems.group().replaceAll("[\\{|\\}]+", "");
+        String[] items = sitems.split(",");
+        require(items, path, imports);
     }
     
     
@@ -132,25 +122,40 @@ public class Svelte3DOM {
         String[] names;
         String path;
     }
-    
     public String compileFile(String filename,String charset) throws IOException{
-        return compile(Files.readString(Path.of(filename), Charset.forName(charset)));
+        return compileFile(filename, charset, new HashMap<>(), true);
+    }
+    public String compileFile(String filename,String charset, HashMap<String,HashMap<String,String>> imports) throws IOException{
+        return compileFile(filename, charset, imports, true);
+    }
+    public String compileFile(String filename, String charset, HashMap<String,HashMap<String,String>> imports, boolean addGlobals) throws IOException{
+        return compile(
+                Files.readString(Path.of(filename), Charset.forName(charset)),
+                imports,
+                addGlobals
+        );
     }
     
-    public String compile(String source){
+    public String compile(String source) throws IOException{
         return compile(source, new HashMap<>(), true);
     }
     
-    public String compile(String source, HashMap<String,List<String>> imports){
+    public String compile(String source, HashMap<String,HashMap<String,String>> imports) throws IOException{
         return compile(source, imports, true);
     }
     
-    public String compile(String source, HashMap<String,List<String>> imports, boolean addGlobals){
+    public String compile(String source, HashMap<String,HashMap<String,String>> imports, boolean addGlobals) throws IOException{
         Value app = context.eval("js", "(function(source){return compile(source,{generate:'dom',format:'cjs'}).js.code;});");
         String compiledContents = app.execute(source).asString();
         
-        String[] svelteAnythingPieces = matchExtractAndReplaceSvelteAnything(compiledContents,imports);
         
+        Matcher m = PATTERN_REQUIRES.matcher(compiledContents);
+        while(m.find()){
+            String item = m.group();
+            //System.out.println("import:"+item);
+            parseRequires(item,imports);
+        }
+        compiledContents = m.replaceAll("");
         
         String globals = addGlobals?String.join("\n", 
             "let exports = {}",
@@ -161,25 +166,41 @@ public class Svelte3DOM {
             "const binding_callbacks = [];",
             "const render_callbacks = [];",
             "const flush_callbacks = [];",
-            "const resolved_promise = Promise.resolve();"
+            "const resolved_promise = Promise.resolve();",
+            "let update_scheduled = false;"
         ):"";
         
-        compiledContents = String.join("\n",
-            globals,
-            require(new String[]{
-                "is_function",
-                "flush",
-                "add_render_callback",
-                "mount_component",
-                "run",
-                "run_all",
-                "get_current_component",
-                "blank_object",
-                "set_current_component"
-            }, "svelte/internal", imports),
-            String.join("\n", svelteAnythingPieces)
-        );
+        require(new String[]{
+            "is_function",
+            "flush",
+            "add_render_callback",
+            "mount_component",
+            "run",
+            "run_all",
+            "get_current_component",
+            "blank_object",
+            "set_current_component"
+        }, "svelte/internal", imports);
         
+        
+        
+        
+        ArrayList<String> headers = new ArrayList<>();
+        
+        imports.forEach(((path, importsObject) -> {
+            importsObject.forEach((name, contents) -> {
+                headers.add(contents);
+            });
+        }));
+        
+        String[] pieces = PATTERN_USE_STRICT.split(compiledContents, 2);
+        compiledContents = String.join("\n", 
+            pieces[0],
+            "'use strict';",
+            globals,
+            String.join("\n",headers), 
+            pieces[1]
+        );
         return compiledContents;
     }
     
@@ -212,20 +233,16 @@ public class Svelte3DOM {
         String propsString = context.eval("js","(function (props){return JSON.stringify(props)})").execute(props).asString();
         //String[] pieces = internalPattern.split(compiledSource, 2);
         //compiledSource = pieces[0] + internal + pieces[1];
-        compiledSource = compiledSource
-                .replace("'use strict';", "var app = (function () {let exports={};")
-                .replace("\"use strict\";", "var app = (function () {let exports={};")
-                .replace(
-                        "exports.default = Component;",
-                        
-                            "var app = new Component({"
-                                + "target: document.body,"
-                                + "props: "+propsString
-                            + "});\n" +
-                            "return app;\n" +
-                        "}());"
-                )
-                ;
+
+        compiledSource = 
+        "(function () {\n" +
+            compiledSource+
+            "var app = new Component({\n" +
+                "target: document.body,\n" +
+                "props: "+propsString + "\n" +
+            "});\n" +
+            "return app;\n" +
+        "}());";
         //System.out.println(compiledSource);
         bundles.put(id, compiledSource);
     }
