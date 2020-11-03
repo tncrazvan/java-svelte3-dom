@@ -11,9 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -100,7 +97,7 @@ public class Svelte3DOM {
     
     
     private static final Pattern PATTERN_SVELTE_ITEMS = Pattern.compile("(?<=const)(?<=\\{)?.*(?=\\})?(?==)",Pattern.MULTILINE|Pattern.DOTALL);
-    private static final Pattern PATTERN_SVELTE_PATH = Pattern.compile("(?<=require\\(\\\").*(?=\\\"\\);)",Pattern.MULTILINE|Pattern.DOTALL);
+    private static final Pattern PATTERN_SVELTE_PATH = Pattern.compile("(?<=require\\(\\\"|').*(?=\\\"|'\\);)",Pattern.MULTILINE|Pattern.DOTALL);
     private static final Pattern PATTERN_REQUIRES = Pattern.compile("^const .*require\\([\"'].*[\"']\\);",Pattern.MULTILINE);
     private static final Pattern PATTERN_USE_STRICT = Pattern.compile("[\"']use strict[\"'];",Pattern.MULTILINE);
     
@@ -112,7 +109,10 @@ public class Svelte3DOM {
         Matcher mitems = PATTERN_SVELTE_ITEMS.matcher(requires);
         if(!mitems.find())
             return;
-        String sitems = mitems.group().replaceAll("[\\{|\\}]+", "");
+        String sitems = mitems
+                .group()
+                .replaceAll("[\\{|\\}]+", "")
+                .replaceAll(".*default:", "");
         String[] items = sitems.split(",");
         require(items, path, imports);
     }
