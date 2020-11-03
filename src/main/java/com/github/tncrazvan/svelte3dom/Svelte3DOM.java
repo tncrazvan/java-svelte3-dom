@@ -88,9 +88,13 @@ public class Svelte3DOM {
                     "})();"
                 );
             }else{
-                String script = "(function (){const {"+item+"} = require('"+path+"'); return "+item+".toString();})";
-                String value = context.eval("js",script).execute().asString();
-                importedPath.put(item, value);
+                
+                if(names.length > 1) {
+                    String script = "(function (){const {"+item+"} = require('"+path+"'); if(!"+item+") FileReaderJS.readString('"+path+"'); else return "+item+".toString();})";
+                    String value = context.eval("js",script).execute().asString();
+                    importedPath.put(item, value);
+                }else
+                    importedPath.put(item, Files.readString(Path.of(path)));
             }
         }
     }
