@@ -186,7 +186,7 @@ public class Svelte3DOM {
         Matcher m = PATTERN_REQUIRES.matcher(compiledContents);
         while(m.find()){
             String item = m.group();
-            System.out.println("import:"+item);
+            //System.out.println("import:"+item);
             parseRequires(item.trim(),imports);
         }
         compiledContents = m.replaceAll("");
@@ -259,13 +259,13 @@ public class Svelte3DOM {
         return bundles.get(id);
     }
     
-    public void bundle(String id, String compiledSource){
-        bundle(id, compiledSource, new HashMap<>());
+    public String bundle(String compiledSource){
+        return bundle(compiledSource, new HashMap<>());
     }
     
     private static final Pattern internalPattern = Pattern.compile(".*require\\s*\\(\\s*\"svelte\\/internal\"\\s*\\)\\s*;");
     
-    public void bundle(String id, String compiledSource, HashMap<String,Object> props){
+    public String bundle(String compiledSource, HashMap<String,Object> props){
         String propsString = context.eval("js","(function (props){return JSON.stringify(props)})").execute(props).asString();
         //String[] pieces = internalPattern.split(compiledSource, 2);
         //compiledSource = pieces[0] + internal + pieces[1];
@@ -280,7 +280,8 @@ public class Svelte3DOM {
             "return app;\n" +
         "}());";
         //System.out.println(compiledSource);
-        bundles.put(id, compiledSource);
+        //bundles.put(id, compiledSource);
+        return compiledSource;
     }
     
     
