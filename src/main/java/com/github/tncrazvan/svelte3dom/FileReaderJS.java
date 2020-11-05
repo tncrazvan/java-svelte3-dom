@@ -22,6 +22,7 @@ public class FileReaderJS {
         return readString(filename, Value.asValue("UTF-8"));
     }
     public static String readString(Value filename, Value charset) throws IOException{
-        return Files.readString(Path.of(filename.asString()), Charset.forName(charset.asString()));
+        String name = filename.asString();
+        return Files.readString(Path.of(name), Charset.forName(charset.asString()));
     }
 }

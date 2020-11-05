@@ -12,7 +12,6 @@ import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
@@ -38,11 +37,11 @@ public class Svelte3DOM {
                     .build();
             
             String tools =
-                    "const System = Java.type('java.lang.System');" +
-                    "const FileReaderJS = Java.type('com.github.tncrazvan.svelte3dom.FileReaderJS');" +
-                    "load('./node_modules/jvm-npm/src/main/javascript/jvm-npm.js');" +
-                    "const { compile } = require('./compiler.js');"
-                    ;
+                "const System = Java.type('java.lang.System');" +
+                "const FileReaderJS = Java.type('com.github.tncrazvan.svelte3dom.FileReaderJS');" +
+                "load('./node_modules/jvm-npm/src/main/javascript/jvm-npm.js');" +
+                "const { compile } = require('./compiler.js');"
+            ;
             
             context.eval("js",tools);
             
@@ -72,12 +71,12 @@ public class Svelte3DOM {
     
     //compiling stuff
     
-    private void require(String[] names, String path, LinkedHashMap<String,HashMap<String,String>> imports) throws IOException{
+    private void require(String[] names, String path, LinkedHashMap<String,LinkedHashMap<String,String>> imports) throws IOException{
         path = path.trim();
         if(!imports.containsKey(path))
-            imports.put(path, new HashMap<>());
+            imports.put(path, new LinkedHashMap<>());
         
-        HashMap<String,String> importedPath = imports.get(path);
+        LinkedHashMap<String,String> importedPath = imports.get(path);
         
         for(String item : names){
             item = item.trim();
@@ -108,7 +107,15 @@ public class Svelte3DOM {
                     String value = context.eval("js",script).execute().asString();
                     importedPath.put(item, value);
                 }else {
-                    importedPath.put(item, Files.readString(Path.of(path)));
+                    //importedPath.put(item, Files.readString(Path.of(path)));
+                    String value = Files.readString(Path.of(path));
+                    value = PATTERN_EXPORT_DEFAULT.matcher(value).replaceFirst("return ");
+                    value = 
+                        "const "+item+" =(function (){\n" + 
+                            value +
+                        "})();"
+                    ;
+                    importedPath.put(item, value);
                 }
             }
         }
@@ -119,8 +126,9 @@ public class Svelte3DOM {
     private static final Pattern PATTERN_SVELTE_PATH = Pattern.compile("(?<=from)\\s+[\"'].*[\"'];?",Pattern.MULTILINE|Pattern.DOTALL);
     private static final Pattern PATTERN_REQUIRES = Pattern.compile("import\\s\\{?\\s*\\n*([A-z_$][A-z0-9_$]*\\s*\\n*,*\\s*\\n*?)*\\s*\\n*\\}*\\s*\\n*from\\s*\\n*[\"'][A-z0-9_$\\/@\\.,;:|-]*[\"'\\s*\\n*];?",Pattern.MULTILINE|Pattern.DOTALL);
     private static final Pattern PATTERN_USE_STRICT = Pattern.compile("[\"']use strict[\"'];",Pattern.MULTILINE);
+    private static final Pattern PATTERN_EXPORT_DEFAULT = Pattern.compile("export\\s+default\\s+",Pattern.MULTILINE);
     
-    private void parseRequires(String requires, LinkedHashMap<String,HashMap<String,String>> imports) throws IOException{
+    private void parseRequires(String requires, LinkedHashMap<String,LinkedHashMap<String,String>> imports) throws IOException{
         Matcher mpath = PATTERN_SVELTE_PATH.matcher(requires);
         if(!mpath.find())
             return;
@@ -144,10 +152,10 @@ public class Svelte3DOM {
     public String compileFile(String filename,String charset) throws IOException{
         return compileFile(filename, charset, new LinkedHashMap<>(), true, true);
     }
-    public String compileFile(String filename,String charset, LinkedHashMap<String,HashMap<String,String>> imports) throws IOException{
+    public String compileFile(String filename,String charset, LinkedHashMap<String,LinkedHashMap<String,String>> imports) throws IOException{
         return compileFile(filename, charset, imports, true);
     }
-    public String compileFile(String filename, String charset, LinkedHashMap<String,HashMap<String,String>> imports, boolean addGlobals) throws IOException{
+    public String compileFile(String filename, String charset, LinkedHashMap<String,LinkedHashMap<String,String>> imports, boolean addGlobals) throws IOException{
         String contents = Files.readString(Path.of(filename), Charset.forName(charset));
         return compile(
             contents,
@@ -156,7 +164,7 @@ public class Svelte3DOM {
             true
         );
     }
-    public String compileFile(String filename, String charset, LinkedHashMap<String,HashMap<String,String>> imports, boolean addGlobals, boolean addImports) throws IOException{
+    public String compileFile(String filename, String charset, LinkedHashMap<String,LinkedHashMap<String,String>> imports, boolean addGlobals, boolean addImports) throws IOException{
         String contents = Files.readString(Path.of(filename), Charset.forName(charset));
         return compile(
             contents,
@@ -170,15 +178,15 @@ public class Svelte3DOM {
         return compile(source, new LinkedHashMap<>(), true, true);
     }
     
-    public String compile(String source, LinkedHashMap<String,HashMap<String,String>> imports) throws IOException{
+    public String compile(String source, LinkedHashMap<String,LinkedHashMap<String,String>> imports) throws IOException{
         return compile(source, imports, true, true);
     }
     
-    public String compile(String source, LinkedHashMap<String,HashMap<String,String>> imports, boolean addGlobals) throws IOException{
+    public String compile(String source, LinkedHashMap<String,LinkedHashMap<String,String>> imports, boolean addGlobals) throws IOException{
         return compile(source, imports, addGlobals, true);
     }
     
-    public String compile(String source, LinkedHashMap<String,HashMap<String,String>> imports, boolean addGlobals, boolean addImports) throws IOException{
+    public String compile(String source, LinkedHashMap<String,LinkedHashMap<String,String>> imports, boolean addGlobals, boolean addImports) throws IOException{
         Value app = context.eval("js", "(function(source){return compile(source,{generate:'dom',format:'esm'}).js.code;});");
         String compiledContents = app.execute(source).asString();
         
@@ -201,8 +209,30 @@ public class Svelte3DOM {
             "const render_callbacks = [];",
             "const flush_callbacks = [];",
             "const resolved_promise = Promise.resolve();",
-            "let update_scheduled = false;"
+            "let update_scheduled = false;",
+            "function make_dirty(component, i) {" +
+                "if (component.$$.dirty[0] === -1) {" +
+                    "dirty_components.push(component);" +
+                    "schedule_update();" +
+                    "component.$$.dirty.fill(0);" +
+                "}" +
+                "component.$$.dirty[(i / 31) | 0] |= (1 << (i % 31));" +
+            "}",
+            "function update($$) {" +
+                "if ($$.fragment !== null) {" +
+                    "$$.update();" +
+                    "run_all($$.before_update);" +
+                    "const dirty = $$.dirty;" +
+                    "$$.dirty = [-1];" +
+                    "$$.fragment && $$.fragment.p($$.ctx, dirty);" +
+                    "$$.after_update.forEach(add_render_callback);" +
+                "}" +
+            "}"/*,
+            "function dispatch(node, direction, kind) {" +
+                "node.dispatchEvent(custom_event(`${direction ? 'intro' : 'outro'}${kind}`));" +
+            "}"*/
         ):"";
+        
         
         if(addImports)
             require(new String[]{
@@ -214,20 +244,23 @@ public class Svelte3DOM {
                 "run_all",
                 "get_current_component",
                 "blank_object",
-                "set_current_component"
+                "set_current_component",
+                "schedule_update",
             }, "svelte/internal", imports);
+        
         
         
         
         
         ArrayList<String> headers = new ArrayList<>();
         
-        if(addImports)
+        if(addImports){
             imports.forEach(((path, importsObject) -> {
                 importsObject.forEach((name, contents) -> {
                     headers.add(contents);
                 });
             }));
+        }
         
         compiledContents = String.join("\n", 
             globals,
@@ -260,17 +293,18 @@ public class Svelte3DOM {
     }
     
     public String bundle(String compiledSource){
-        return bundle(compiledSource, new HashMap<>());
+        return bundle(compiledSource, new LinkedHashMap<>());
     }
     
     private static final Pattern internalPattern = Pattern.compile(".*require\\s*\\(\\s*\"svelte\\/internal\"\\s*\\)\\s*;");
     
-    public String bundle(String compiledSource, HashMap<String,Object> props){
+    public String bundle(String compiledSource, LinkedHashMap<String,Object> props){
         String propsString = context.eval("js","(function (props){return JSON.stringify(props)})").execute(props).asString();
         //String[] pieces = internalPattern.split(compiledSource, 2);
         //compiledSource = pieces[0] + internal + pieces[1];
 
         compiledSource = 
+        "document.body.innerHTML = '';\n" +
         "(function () {\n" +
             compiledSource+
             "var app = new Component({\n" +
